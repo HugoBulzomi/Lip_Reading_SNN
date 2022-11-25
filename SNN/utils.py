@@ -66,8 +66,11 @@ def reduce_screen_resolution(data, amount=10):
 	return d
 
 # Converts event data into frames to use with convolutional layer
-def convert_to_event_frames(data, h=500, w=650, time_padding=60, screen_res_reduce=2):
-	d = reduce_time_resolution(data, amount=50000, padding=0)
+def convert_to_event_frames(data, h=500, w=650, time_padding=120, screen_res_reduce=2):
+	d = reduce_time_resolution(data, amount=25000, padding=0)
+
+	print("T:",d[-1])
+
 	d = reduce_screen_resolution(d, amount=screen_res_reduce)
 	d = random_delete_events(d, 0.5)
 	if time_padding>0:
@@ -95,6 +98,7 @@ def convert_to_event_frames(data, h=500, w=650, time_padding=60, screen_res_redu
 	print(frames.shape)
 	exit()
 	'''
+	
 	
 	#print("Size of one video: {}x{}x{} = {} MB".format(frames.shape[0], frames.shape[1], frames.shape[2], frames.nbytes*0.000001))
 	return frames

@@ -9,7 +9,7 @@ LR = 0.0001
 INPUT_FEATURES = 650*500 
 HIDDEN_FEATURES = 100
 OUTPUT_FEATURES = 5
-BATCH_SIZE = 1
+BATCH_SIZE = 4
 MODEL_CHECKPOINT_PATH = "small_snn.pt"
 
 
@@ -35,7 +35,7 @@ model = Model(
 ).to(DEVICE)
 '''
 model = Model(
-	snn=ConvNet(feature_size_h=325 ,feature_size_w=250),
+	snn=TrueNorthSmall2(feature_size_h=325 ,feature_size_w=250),
 	decoder=decode
 ).to(DEVICE)
 optimizer = torch.optim.Adam(model.parameters(), lr=LR)

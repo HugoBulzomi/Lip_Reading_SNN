@@ -105,6 +105,8 @@ class ConvNet(torch.nn.Module):
 
 		self.conv1 = torch.nn.Conv2d(num_channels, 20, 5, 1)
 		self.conv2 = torch.nn.Conv2d(20, 50, 5, 1)
+		print(self.features_h)
+		print(self.features_w)
 		self.fc1 = torch.nn.Linear(self.features_h * self.features_w * 50, 500)
 
 		self.lif0 = LIFCell(p=LIFParameters(method=method, alpha=alpha))
@@ -146,10 +148,10 @@ class ConvNet(torch.nn.Module):
 			z = torch.nn.functional.max_pool2d(z, 2, 2)
 			#print("POOL2: ", z.shape)
 			z = z.view(-1, z.shape[1]*z.shape[2]*z.shape[3])
-			#print(z.shape)
+			print(z.shape)
 			z = self.fc1(z)      
 			#print("fc1 tensor size: ", z.element_size()*z.nelement()*0.000001, "MB")
-			#print("FC1: ", z.shape)
+			print("FC1: ", z.shape)
 			z, s2 = self.lif2(z, s2)
 			#print("LIF1: ", z.shape)
 			v, so = self.out(torch.nn.functional.relu(z), so)
@@ -157,6 +159,186 @@ class ConvNet(torch.nn.Module):
 			voltages[ts, :, :] = v+torch.abs(torch.min(v))
 			#print("Voltage tensor size: ", voltages.element_size()*voltages.nelement()*0.000001, "MB")
 		return voltages
+
+
+
+# Smaller version of TrueNorth model, with only the first 8 convolution layers (as described in SLAYER ?)
+class TrueNorthSmall(torch.nn.Module):
+	def __init__(self,  num_channels=1, feature_size_h=500, feature_size_w=650, method="super", alpha=100, num_labels=5):
+		super(TrueNorthSmall, self).__init__()
+		self.feature_size_h = feature_size_h
+		self.feature_size_w = feature_size_w
+		self.num_channels = num_channels
+		self.num_labels=num_labels
+
+		self.features_h = int( (((feature_size_h - 4)/2-4) /2-4)/ 2)
+		self.features_w = int( (((feature_size_w - 4)/2-4) /2-4)/ 2)
+		print(self.features_h)
+		print(self.features_w)
+
+		# TrueNorth paper describes binary activation functions for convolutional neurons and trinary weights {-1, 0, 1} -> how to do that in pytorch ?
+		self.conv1 = torch.nn.Conv2d(num_channels, 12, 5, 1)
+		self.lif1 = LIFCell(p=LIFParameters(method=method, alpha=alpha))
+		self.maxpool1 = torch.nn.MaxPool2d(2, 2)
+
+		self.conv2 = torch.nn.Conv2d(12, 24, 5, 1)
+		self.conv3 = torch.nn.Conv2d(24, 24, 5, 1)
+		self.lif2 = LIFCell(p=LIFParameters(method=method, alpha=alpha))
+		self.maxpool2 = torch.nn.MaxPool2d(2, 2)
+
+		self.conv4 = torch.nn.Conv2d(24, 48, 5, 1)
+		self.conv5 = torch.nn.Conv2d(48, 48, 5, 1)
+		self.conv6 = torch.nn.Conv2d(48, 48, 5, 1)
+		self.conv7 = torch.nn.Conv2d(48, 48, 5, 1)
+		self.conv8 = torch.nn.Conv2d(48, 48, 5, 1)
+		self.lif3 = LIFCell(p=LIFParameters(method=method, alpha=alpha))
+		self.maxpool3 = torch.nn.MaxPool2d(2, 2)
+
+		self.fc1 = torch.nn.Linear(24192, 500)
+		self.lif4 = LIFCell(p=LIFParameters(method=method, alpha=alpha))
+		self.out = LILinearCell(500, num_labels) # Leaky Linear Cells as output -> Use spiking neuron WTA instead ?
+
+	def forward(self, x):
+		seq_length = x.shape[1]
+		batch_size = x.shape[0]
+		s1 = s2 = s3 = s4 = so = None
+
+		voltages = torch.zeros(
+			seq_length, batch_size, self.num_labels, device=x.device, dtype=x.dtype
+		)
+
+		for ts in range(seq_length):
+
+			z = torch.reshape(x[:,ts], (x.shape[0], self.num_channels, x.shape[2], x.shape[3])) # (batch, channel, w, h)
+			z = torch.as_tensor(z).float()
+
+			z = self.conv1(z)
+
+			z, s1 = self.lif1(z, s1)
+			z = self.maxpool1(z)
+
+			z = 10*self.conv2(z)
+			z = self.conv3(z)
+			z, s2 = self.lif2(z, s2)
+			z = self.maxpool2(z)
+
+			z = 10*self.conv4(z)
+			z = self.conv5(z)
+			z = self.conv6(z)
+			z = self.conv7(z)
+			z = self.conv8(z)
+			z, s3 = self.lif3(z, s3)
+			z = self.maxpool3(z)
+
+			z = 10*z.view(-1, z.shape[1]*z.shape[2]*z.shape[3])
+
+			z = self.fc1(z)
+			#print("ICI:",z.sum())
+			z, s4 = self.lif4(z, s4)
+			#print("LA:", z.sum())
+
+			v, so = self.out(torch.nn.functional.relu(z), so)
+
+			voltages[ts, :, :] = v+torch.abs(torch.min(v))
+
+		return voltages
+
+
+
+
+# Another version of TrueNorth model, but this time inspired by the code from a github repo that reproduces the results from SLAYER
+class TrueNorthSmall2(torch.nn.Module):
+	def __init__(self,  num_channels=1, feature_size_h=500, feature_size_w=650, method="super", alpha=100, num_labels=5):
+		super(TrueNorthSmall2, self).__init__()
+		self.feature_size_h = feature_size_h
+		self.feature_size_w = feature_size_w
+		self.num_channels = num_channels
+		self.num_labels=num_labels
+
+		# input 128*128
+		# maxpooling 4 -> 32*32
+		# spiking layer
+		# dropout 0.1
+		# convolution
+		# spiking layer
+		# pooling 2
+		# spiking layer
+		# dropout 0.1
+		# convolution
+		# spiking layer
+		# pooling 2
+		# spiking layer
+		# dropout 0.1
+		# dense
+		# dense classif
+
+
+		self.maxpool1 = torch.nn.MaxPool2d(4, 4)
+		self.lif1 = LIFCell(p=LIFParameters(method=method, alpha=alpha))
+		self.dropout1 = torch.nn.Dropout(p=0.1)
+		self.conv1 = torch.nn.Conv2d(num_channels, 16, 5, 1, padding=2)
+		#self.conv1.weight.mul_(10)
+		self.lif2 = LIFCell(p=LIFParameters(method=method, alpha=alpha))
+		self.maxpool2 = torch.nn.MaxPool2d(2, 2)
+		self.lif3 = LIFCell(p=LIFParameters(method=method, alpha=alpha))
+		self.dropout2 = torch.nn.Dropout(p=0.1)
+		self.conv2 = torch.nn.Conv2d(16, 32, 3, 1, padding=1)
+		#self.conv2.weight.mul_(50)
+		self.lif4 = LIFCell(p=LIFParameters(method=method, alpha=alpha))
+		self.maxpool3 = torch.nn.MaxPool2d(2, 2)
+		self.lif5 = LIFCell(p=LIFParameters(method=method, alpha=alpha))
+		self.dropout3 = torch.nn.Dropout(p=0.1)
+		self.fc1 = torch.nn.Linear(9600, 500)
+		self.out = LILinearCell(500, num_labels) # Leaky Linear Cells as output -> Use spiking neuron WTA instead ?
+
+	def forward(self, x):
+		seq_length = x.shape[1]
+		batch_size = x.shape[0]
+		s1 = s2 = s3 = s4 = s5 = so = None
+
+		voltages = torch.zeros(
+			seq_length, batch_size, self.num_labels, device=x.device, dtype=x.dtype
+		)
+
+		for ts in range(seq_length):
+
+			z = torch.reshape(x[:,ts], (x.shape[0], self.num_channels, x.shape[2], x.shape[3])) # (batch, channel, w, h)
+			z = torch.as_tensor(z).float()
+
+			z = self.maxpool1(z)
+			z, s1 = self.lif1(z, s1)
+			z = self.dropout1(z)
+			z = self.conv1(z)
+			z, s2 = self.lif2(z, s2)
+			z = self.maxpool2(z)
+			z, s3 = self.lif3(z, s3)
+			z = self.dropout2(z)
+			z = 10*self.conv2(z)
+			z, s4 = self.lif4(z, s4)
+			z = self.maxpool3(z)
+			z, s5 = self.lif5(z, s5)
+			z = self.dropout3(z)
+			'''
+			print("ICI 0:",z[0].sum())
+			print("ICI 1:",z[1].sum())
+			print("ICI 2:",z[2].sum())
+			print("ICI 3:",z[3].sum())
+			'''
+
+			z = z.view(-1, z.shape[1]*z.shape[2]*z.shape[3])
+
+			z = self.fc1(z)
+			v, so = self.out(torch.nn.functional.relu(z), so)
+
+			voltages[ts, :, :] = v+torch.abs(torch.min(v))
+
+		return voltages
+
+
+
+
+
+
 
 # Class to wrap SNN model 
 class Model(torch.nn.Module):
